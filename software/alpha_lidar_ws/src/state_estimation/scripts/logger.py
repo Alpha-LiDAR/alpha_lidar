@@ -22,20 +22,20 @@ frame_id = 0
 T__world__o__odom = np.eye(4)
 
 
-def compose(T, pc, keep_data=False):
-    if type(T) is list:
-        return np.row_stack([compose(t, p) for t, p in zip(T, pc)])
+def compose(transform_matrix, point_cloud, keep_data=False):
+    if type(transform_matrix) is list:
+        return np.row_stack([compose(transform, points) for transform, points in zip(transform_matrix, point_cloud)])
     else:
-        if len(pc.shape) == 2:
-            pc_ = np.column_stack([pc[:, :3], np.ones(len(pc))])
+        if len(point_cloud.shape) == 2:
+            homogeneous_points = np.column_stack([point_cloud[:, :3], np.ones(len(point_cloud))])
             if not keep_data:
-                return np.matmul(T, pc_.T).T
+                return np.matmul(transform_matrix, homogeneous_points.T).T
             else:
-                return np.column_stack([np.matmul(T, pc_.T).T[:, :3], pc[:, 3:]])
+                return np.column_stack([np.matmul(transform_matrix, homogeneous_points.T).T[:, :3], point_cloud[:, 3:]])
         else:
             # single point
-            assert len(pc.shape) == 1
-            return np.squeeze(np.matmul(T[:3, :3], pc.reshape(3, 1)).T + T[:3, 3])
+            assert len(point_cloud.shape) == 1
+            return np.squeeze(np.matmul(transform_matrix[:3, :3], point_cloud.reshape(3, 1)).T + transform_matrix[:3, 3])
 
 
 def save_KITTI_bin(points, path):
@@ -72,39 +72,39 @@ def get_RT_matrix(odom_msg):
     return RT_matrix
 
 
-def calc_picth_distribution(pc_origin):
-    # calculate fov
-    x = pc_origin[:, 0]
-    y = pc_origin[:, 1]
-    z = pc_origin[:, 2]
-    distance_xy = LA.norm([x, y], axis=0)
+def calc_pitch_distribution(point_cloud_origin):
+    # calculate field of view
+    x_coords = point_cloud_origin[:, 0]
+    y_coords = point_cloud_origin[:, 1]
+    z_coords = point_cloud_origin[:, 2]
+    distance_xy = LA.norm([x_coords, y_coords], axis=0)
 
-    pitch = np.rad2deg(np.arctan(z / distance_xy))
-    return pitch
+    pitch_angles = np.rad2deg(np.arctan(z_coords / distance_xy))
+    return pitch_angles
 
 
-def calc_fov(eval_type, T__est__odom__o__imu, pc_imu):
+def calc_fov(eval_type, transform_odom_to_imu, point_cloud_imu):
     if eval_type == 'raw':
         # raw point cloud
-        pc_origin = pc_imu
-        pitch = calc_picth_distribution(pc_origin)
-        pitch_fov = pitch.max() - pitch.min()
+        point_cloud_origin = point_cloud_imu
+        pitch_angles = calc_pitch_distribution(point_cloud_origin)
+        pitch_fov = pitch_angles.max() - pitch_angles.min()
     elif eval_type == 'alpha':
         # transform to local map coordinate
-        pc_odom = compose(T__est__odom__o__imu, pc_imu)
+        point_cloud_odom = compose(transform_odom_to_imu, point_cloud_imu)
         # de-center, keep only FoV angle info
-        pc_origin = pc_odom[:, :3] - T__est__odom__o__imu[:3, 3]
+        point_cloud_origin = point_cloud_odom[:, :3] - transform_odom_to_imu[:3, 3]
         # merge front and back
-        pitch_front = calc_picth_distribution(pc_origin[np.where(pc_origin[:, 0] >= 0)])
-        pitch_back = calc_picth_distribution(pc_origin[np.where(pc_origin[:, 0] < 0)])
+        pitch_angles_front = calc_pitch_distribution(point_cloud_origin[np.where(point_cloud_origin[:, 0] >= 0)])
+        pitch_angles_back = calc_pitch_distribution(point_cloud_origin[np.where(point_cloud_origin[:, 0] < 0)])
 
-        pitch_fov = (pitch_front.max() - pitch_front.min()) + (pitch_back.max() - pitch_back.min())
+        pitch_fov = (pitch_angles_front.max() - pitch_angles_front.min()) + (pitch_angles_back.max() - pitch_angles_back.min())
     else:
         raise NotImplementedError
     return pitch_fov
 
 
-def callback(odom_msg, pc_msg, stat_msg):
+def callback(odom_msg, point_cloud_msg, stat_msg):
     global frame_id, odom_list
 
     # save trajectory
@@ -112,31 +112,31 @@ def callback(odom_msg, pc_msg, stat_msg):
         print('wrong pose')
         return
 
-    T__odom__o__imu__est = get_RT_matrix(odom_msg)
+    transform_odom_to_imu_estimated = get_RT_matrix(odom_msg)
     odom_file = os.path.join(ROOT, '{}.odom'.format(odom_msg.header.stamp.to_sec()))
-    np.savetxt(odom_file, np.matmul(T__world__o__odom, T__odom__o__imu__est))
+    np.savetxt(odom_file, np.matmul(T__world__o__odom, transform_odom_to_imu_estimated))
 
     if frame_id % 5 == 0:
         image_pub_raw.publish(title_image_raw_msg)
         image_pub_alpha.publish(title_image_alpha_msg)
         try:
-            pc_msg.fields = [pc_msg.fields[0], pc_msg.fields[1], pc_msg.fields[2],
-                             pc_msg.fields[4], pc_msg.fields[5], pc_msg.fields[6],
-                             pc_msg.fields[3], pc_msg.fields[7]]
-            pc_array = ros_numpy.numpify(pc_msg)
-            if len(pc_array.shape) == 2:
-                pc = np.zeros((pc_array.shape[0] * pc_array.shape[1], 4))
+            point_cloud_msg.fields = [point_cloud_msg.fields[0], point_cloud_msg.fields[1], point_cloud_msg.fields[2],
+                             point_cloud_msg.fields[4], point_cloud_msg.fields[5], point_cloud_msg.fields[6],
+                             point_cloud_msg.fields[3], point_cloud_msg.fields[7]]
+            point_cloud_array = ros_numpy.numpify(point_cloud_msg)
+            if len(point_cloud_array.shape) == 2:
+                point_cloud = np.zeros((point_cloud_array.shape[0] * point_cloud_array.shape[1], 4))
             else:
-                pc = np.zeros((pc_array.shape[0], 4))
+                point_cloud = np.zeros((point_cloud_array.shape[0], 4))
             # parse lidar point array
-            pc[:, 0] = pc_array['x'].reshape(-1)
-            pc[:, 1] = pc_array['y'].reshape(-1)
-            pc[:, 2] = pc_array['z'].reshape(-1)
-            pc = pc[::2, :]
+            point_cloud[:, 0] = point_cloud_array['x'].reshape(-1)
+            point_cloud[:, 1] = point_cloud_array['y'].reshape(-1)
+            point_cloud[:, 2] = point_cloud_array['z'].reshape(-1)
+            point_cloud = point_cloud[::2, :]
 
             # calculate FoV gain
-            fov_raw = calc_fov('raw', T__odom__o__imu__est, pc)
-            fov_alpha = calc_fov('alpha', T__odom__o__imu__est, pc)
+            fov_raw = calc_fov('raw', transform_odom_to_imu_estimated, point_cloud)
+            fov_alpha = calc_fov('alpha', transform_odom_to_imu_estimated, point_cloud)
             stat_file = os.path.join(ROOT, '{}.stats'.format(odom_msg.header.stamp.to_sec()))
             np.savetxt(stat_file, np.array([
                 fov_raw, fov_alpha,
@@ -166,9 +166,9 @@ def create_title_image():
     return img_raw, img_alpha
 
 
-def numpy_to_ros_image(np_image, encoding):
+def numpy_to_ros_image(numpy_image, encoding):
     # cvBridge may not work with py3
-    height, width, channels = np_image.shape
+    height, width, channels = numpy_image.shape
 
     ros_image = Image()
     ros_image.header.stamp = rospy.Time.now()
@@ -177,7 +177,7 @@ def numpy_to_ros_image(np_image, encoding):
     ros_image.encoding = encoding
     ros_image.is_bigendian = 0
     ros_image.step = width * channels
-    ros_image.data = np_image.tobytes()
+    ros_image.data = numpy_image.tobytes()
 
     return ros_image
 

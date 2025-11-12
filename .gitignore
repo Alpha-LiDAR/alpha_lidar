@@ -6,3 +6,5 @@ datasets/*.gt
 software/alpha_lidar_ws/src/state_estimation/cmake-build-debug
 software/alpha_lidar_ws/devel
 software/alpha_lidar_ws/build
+__pycache__
+*.pyc

@@ -95,8 +95,8 @@ double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
 double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
 double filter_size_surf_min = 0;
 double total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0, lidar_end_time_prev=0;
-int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
-int    iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_index = 0;
+int    effective_feature_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
+int    iteration_count = 0, features_downsampled_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_index = 0;
 int scan_index = 0;
 bool   point_selected_surf[100000] = {0};
 bool   lidar_pushed, flg_first_scan = true, flg_exit = false, flg_EKF_inited;
@@ -122,10 +122,10 @@ deque<sensor_msgs::Imu::ConstPtr> imu_buffer;
 deque<nav_msgs::Odometry::ConstPtr> encoder_buffer;
 
 PointCloudXYZI::Ptr featsFromMap(new PointCloudXYZI());
-PointCloudXYZI::Ptr feats_undistort(new PointCloudXYZI());
-PointCloudXYZI::Ptr feats_down_body(new PointCloudXYZI());
-PointCloudXYZI::Ptr feats_down_world(new PointCloudXYZI());
-PointCloudXYZI::Ptr normvec(new PointCloudXYZI(100000, 1));
+PointCloudXYZI::Ptr features_undistorted(new PointCloudXYZI());
+PointCloudXYZI::Ptr features_downsampled_body(new PointCloudXYZI());
+PointCloudXYZI::Ptr features_downsampled_world(new PointCloudXYZI());
+PointCloudXYZI::Ptr normal_vectors(new PointCloudXYZI(100000, 1));
 //PointCloudXYZI::Ptr laserCloudOri(new PointCloudXYZI(100000, 1));
 //PointCloudXYZI::Ptr corr_normvect(new PointCloudXYZI(100000, 1));
 PointCloudXYZI::Ptr _featsArray;
@@ -472,7 +472,7 @@ void publish_frame_world(const ros::Publisher & pubLaserCloudFull)
         if (scan_index <= 1){
             return;
         }
-        PointCloudXYZI::Ptr laserCloudFullRes(dense_pub_en ? feats_undistort : feats_down_body);
+        PointCloudXYZI::Ptr laserCloudFullRes(dense_pub_en ? features_undistorted : feats_down_body);
         // 随机下采样 只用于可视化
         if(!dense_pub_en){
             downSizeFilterVis.setSample(publish_downsample_points);
@@ -527,8 +527,8 @@ void publish_frame_world(const ros::Publisher & pubLaserCloudFull)
 
 void publish_frame_body(const ros::Publisher & pubLaserCloudFull_body)
 {
-//    int size = feats_undistort->points.size();
-    PointCloudXYZI::Ptr laserCloudFullRes(dense_pub_en ? feats_undistort : feats_down_body);
+//    int size = features_undistorted->points.size();
+    PointCloudXYZI::Ptr laserCloudFullRes(dense_pub_en ? features_undistorted : feats_down_body);
     int size = laserCloudFullRes->points.size();
     PointCloudXYZI::Ptr laserCloudIMUBody(new PointCloudXYZI(size, 1));
     for (int i = 0; i < size; i++)
@@ -1009,11 +1009,11 @@ void execute(){
     }
 
     double t_optimize_start = omp_get_wtime();
-    p_imu->Process(Measures, kf, feats_undistort);
+    p_imu->Process(Measures, kf, features_undistorted);
     state_point = kf.get_x();
     pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
 
-  if (feats_undistort->empty() || (feats_undistort == NULL)) {
+  if (features_undistorted->empty() || (features_undistorted == NULL)) {
     ROS_WARN("No point, skip this scan!\n");
     // continue;
     return;
@@ -1025,7 +1025,7 @@ void execute(){
     // 第一帧 如果ekf初始化了 就初始化voxel地图
     if (flg_EKF_inited && !init_map) {
         PointCloudXYZI::Ptr world_lidar(new PointCloudXYZI);
-        transformLidar(state_point, feats_undistort, world_lidar);
+        transformLidar(state_point, features_undistorted, world_lidar);
         std::vector<pointWithCov> pv_list;
 
         // std::cout << kf.get_P() << std::endl;
@@ -1034,9 +1034,9 @@ void execute(){
             pointWithCov pv;
             pv.point << world_lidar->points[i].x, world_lidar->points[i].y,
                     world_lidar->points[i].z;
-            V3D point_this(feats_undistort->points[i].x,
-                           feats_undistort->points[i].y,
-                           feats_undistort->points[i].z);
+            V3D point_this(features_undistorted->points[i].x,
+                           features_undistorted->points[i].y,
+                           features_undistorted->points[i].z);
             // if z=0, error will occur in calcBodyCov. To be solved
             if (point_this[2] == 0) {
                 point_this[2] = 0.001;
@@ -1072,7 +1072,7 @@ void execute(){
     }
 
     /*** downsample the feature points in a scan ***/
-    downSizeFilterSurf.setInputCloud(feats_undistort);
+    downSizeFilterSurf.setInputCloud(features_undistorted);
     downSizeFilterSurf.filter(*feats_down_body);
 
     // 如果首次下采样点数量还是太多(一般是大场景,不需要这么多点) 那么就adaptive 再次下采样
@@ -1104,13 +1104,13 @@ void execute(){
             downSizeFilterAdaptive.setLeafSize(leaf_size_scaled, leaf_size_scaled, leaf_size_scaled);
             if (leaf_size_scaled < filter_size_surf_min) {
                 // 升采样 用原始点云
-                downSizeFilterAdaptive.setInputCloud(feats_undistort);
+                downSizeFilterAdaptive.setInputCloud(features_undistorted);
             } else {
                 downSizeFilterAdaptive.setInputCloud(feats_down_body);
             }
             downSizeFilterAdaptive.filter(*feats_down_body);
             std::printf("ADV: RAW: %10ld | First:  %10ld | Adap: %10ld, %5fpts, %5fm\n",
-                        feats_undistort->size(),
+                        features_undistorted->size(),
                         feats_down_size_first,
                         feats_down_body->size(),
                         adaptive_threshold[search_idx],
@@ -1120,7 +1120,7 @@ void execute(){
 
     sort(feats_down_body->points.begin(), feats_down_body->points.end(), time_list);
 
-    feats_down_size = feats_down_body->points.size();
+    features_downsampled_size = feats_down_body->points.size();
     // 由于点云的body var是一直不变的 因此提前计算 在迭代时可以复用
     var_down_body.clear();
     for (auto & pt:feats_down_body->points) {
@@ -1129,7 +1129,7 @@ void execute(){
     }
 
     /*** ICP and iterated Kalman filter update ***/
-    if (feats_down_size < 5)
+    if (features_downsampled_size < 5)
     {
         ROS_WARN("Too few points (<5 points), skip this scan!\n");
         // continue;

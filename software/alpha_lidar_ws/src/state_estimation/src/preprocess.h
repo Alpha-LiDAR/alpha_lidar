@@ -93,9 +93,9 @@ class Preprocess
   void set(bool feat_en, int lid_type, double bld, int pfilt_num);
 
   // sensor_msgs::PointCloud2::ConstPtr pointcloud;
-  PointCloudXYZI pl_full, pl_corn, pl_surf, pl_surf_filtered;
-  PointCloudXYZI pl_buff[128]; //maximum 128 line lidar
-  vector<orgtype> typess[128]; //maximum 128 line lidar
+  PointCloudXYZI point_cloud_full, point_cloud_corner, point_cloud_surface, point_cloud_surface_filtered;
+  PointCloudXYZI point_cloud_buffer[128]; //maximum 128 line lidar
+  vector<orgtype> point_types[128]; //maximum 128 line lidar
   int lidar_type, point_filter_num, N_SCANS, SCAN_RATE;
   double blind;
   bool feature_enabled, given_offset_time;
@@ -106,19 +106,19 @@ class Preprocess
   void avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg);
   void oust64_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
-  void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
-  void pub_func(PointCloudXYZI &pl, const ros::Time &ct);
-  int  plane_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, uint &i_nex, Eigen::Vector3d &curr_direct);
-  bool small_plane(const PointCloudXYZI &pl, vector<orgtype> &types, uint i_cur, uint &i_nex, Eigen::Vector3d &curr_direct);
-  bool edge_jump_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, Surround nor_dir);
+  void give_feature(PointCloudXYZI &point_cloud, vector<orgtype> &types);
+  void pub_func(PointCloudXYZI &point_cloud, const ros::Time &ct);
+  int  plane_judge(const PointCloudXYZI &point_cloud, vector<orgtype> &types, uint i, uint &i_nex, Eigen::Vector3d &curr_direct);
+  bool small_plane(const PointCloudXYZI &point_cloud, vector<orgtype> &types, uint i_cur, uint &i_nex, Eigen::Vector3d &curr_direct);
+  bool edge_jump_judge(const PointCloudXYZI &point_cloud, vector<orgtype> &types, uint i, Surround nor_dir);
   
   int group_size;
-  double disA, disB, inf_bound;
+  double distance_threshold_A, distance_threshold_B, inf_bound;
   double limit_maxmid, limit_midmin, limit_maxmin;
-  double p2l_ratio;
+  double point_to_line_ratio;
   double jump_up_limit, jump_down_limit;
   double cos160;
-  double edgea, edgeb;
-  double smallp_intersect, smallp_ratio;
+  double edge_threshold_a, edge_threshold_b;
+  double small_plane_intersect, small_plane_ratio;
   double vx, vy, vz;
 };
