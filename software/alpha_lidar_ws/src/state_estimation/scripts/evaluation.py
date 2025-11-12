@@ -29,10 +29,10 @@ def moving_average(interval, windowsize):
 def pose_list_to_TUM_ndarray(pose_list):
     tum_array = []
     # for ts, pose in pose_list[:len(pose_list) // 2]:
-    for ts, pose in pose_list:
+    for timestamp, pose in pose_list:
         pose_quat = transforms3d.quaternions.mat2quat(pose[:3, :3])
         tum_array.append([
-            ts,
+            timestamp,
             pose[0, 3], pose[1, 3], pose[2, 3],
             pose_quat[1], pose_quat[2], pose_quat[3], pose_quat[0]
         ])
@@ -56,33 +56,33 @@ def load_state_estimation_result(root):
     return trajectory
 
 
-def process_traj(gt, traj):
-    # 将traj存储为evo需要的形式
-    gt_path, traj_path = None, None
-    if type(gt) is str:
-        gt_path = gt
-    elif type(gt) is np.ndarray:
-        gt_path = '/tmp/__gt.traj'
-        np.savetxt(gt_path, gt, fmt='%.9f')
+def process_traj(ground_truth, trajectory):
+    # Store trajectory in format required by evo
+    ground_truth_path, trajectory_path = None, None
+    if type(ground_truth) is str:
+        ground_truth_path = ground_truth
+    elif type(ground_truth) is np.ndarray:
+        ground_truth_path = '/tmp/__gt.traj'
+        np.savetxt(ground_truth_path, ground_truth, fmt='%.9f')
     else:
         raise NotImplementedError('Traj type not support')
 
-    if type(traj) is str:
-        traj_path = traj
-    elif type(traj) is np.ndarray:
-        traj_path = '/tmp/__est.traj'
-        np.savetxt(traj_path, traj, fmt='%.9f')
+    if type(trajectory) is str:
+        trajectory_path = trajectory
+    elif type(trajectory) is np.ndarray:
+        trajectory_path = '/tmp/__est.traj'
+        np.savetxt(trajectory_path, trajectory, fmt='%.9f')
 
     else:
         raise NotImplementedError('Traj type not support')
 
-    return gt_path, traj_path
+    return ground_truth_path, trajectory_path
 
 
-def evo_ate(gt, traj,
+def evo_ate(ground_truth, trajectory,
             pose_relation='trans_part', silent=False, plot=False, align=True, t_max_diff=None,
             n_to_align=None, additional_params=[]):
-    gt_path, traj_path = process_traj(gt, traj)
+    ground_truth_path, trajectory_path = process_traj(ground_truth, trajectory)
     # clear parameters
     additional_params.clear()
     if silent:
@@ -96,7 +96,7 @@ def evo_ate(gt, traj,
     if t_max_diff:
         additional_params += ['--t_max_diff', str(t_max_diff)]
     sys.argv = [sys.argv[0], 'tum',
-                gt_path, traj_path,
+                ground_truth_path, trajectory_path,
                 '-r', pose_relation,
                 '--plot_mode', 'xy',
                 ] + additional_params
@@ -124,7 +124,7 @@ def load_stat_sequence(root):
     return timestamp, fov_raw, fov_alpha, np.array(latency_opt), np.array(latency_update)
 
 
-def evaluate_segmented_local_ate(traj_est, traj_gt, windows_length, window_step, ):
+def evaluate_segmented_local_ate(trajectory_estimated, trajectory_ground_truth, windows_length, window_step, ):
     """
     calculate mean ATE of local map segments, which is used to evaluate the quality of integrated local map
     """
@@ -132,20 +132,20 @@ def evaluate_segmented_local_ate(traj_est, traj_gt, windows_length, window_step,
     print('-' * 40)
     print(
         f'ATE (Absolute Trajectory Error) of each map segment:')
-    for window_idx, window_frontier in enumerate(range(0, len(traj_est), window_step)):
-        if window_frontier + windows_length >= len(traj_est):
+    for window_idx, window_frontier in enumerate(range(0, len(trajectory_estimated), window_step)):
+        if window_frontier + windows_length >= len(trajectory_estimated):
             break
         # crop segments
-        traj_eval = traj_est[window_frontier:min(window_frontier + windows_length, len(traj_est) - 1)]
+        trajectory_eval = trajectory_estimated[window_frontier:min(window_frontier + windows_length, len(trajectory_estimated) - 1)]
         try:
-            ape = evo_ate(traj_gt, traj_eval, align=True, silent=True, t_max_diff=0.1)
+            ape = evo_ate(trajectory_ground_truth, trajectory_eval, align=True, silent=True, t_max_diff=0.1)
         except Exception as e:
             print('No associated timestamp')
             continue
         print(f'| Map segment: {window_idx + 1:4d}', end='')
-        for k, v in ape.stats.items():
-            ATE_stats[k].append(v)
-            print(f'| {k}: {v:.5f} m', end='')
+        for key, value in ape.stats.items():
+            ATE_stats[key].append(value)
+            print(f'| {key}: {value:.5f} m', end='')
         print()
     print('\n' + '-' * 40)
     print(
@@ -231,8 +231,8 @@ if __name__ == '__main__':
         exit(1)
 
     if args.gt_path is not None:
-        trajectory_est = load_state_estimation_result(root=evaluation_tmp_root)
-        trajctory_gt = np.loadtxt(args.gt_path)
-        evaluate_segmented_local_ate(trajectory_est, trajctory_gt, windows_length=200, window_step=100)
+        trajectory_estimated = load_state_estimation_result(root=evaluation_tmp_root)
+        trajectory_ground_truth = np.loadtxt(args.gt_path)
+        evaluate_segmented_local_ate(trajectory_estimated, trajectory_ground_truth, windows_length=200, window_step=100)
 
     evaluate_stat(evaluation_tmp_root)
